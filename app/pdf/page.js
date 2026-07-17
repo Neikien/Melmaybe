@@ -35,7 +35,7 @@ export default function HelloPage() {
     setImages(prev => prev.filter(img => img.id !== id));
   };
 
-  // Ham lay kich thuoc anh
+  // Hàm lấy kích thước ảnh
   const getImageDimensions = (url) => {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -45,108 +45,139 @@ export default function HelloPage() {
     });
   };
 
-  // Ham resize anh ve chieu rong target
+  // Hàm resize ảnh - cải thiện
   const resizeImageToWidth = (img, targetWidth) => {
-    const newHeight = (img.height / img.width) * targetWidth;
-    
-    const canvas = document.createElement('canvas');
-    canvas.width = targetWidth;
-    canvas.height = newHeight;
-    const ctx = canvas.getContext('2d');
-    
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    
-    // Ve nen trang tranh loi PNG
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    ctx.drawImage(img, 0, 0, targetWidth, newHeight);
-    
-    return {
-      dataUrl: canvas.toDataURL('image/jpeg', 0.92),
-      width: targetWidth,
-      height: newHeight
-    };
+    return new Promise((resolve) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      // Tính toán tỷ lệ để giữ đúng tỷ lệ khung hình
+      const ratio = targetWidth / img.width;
+      const targetHeight = img.height * ratio;
+      
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      
+      // Vẽ ảnh với chất lượng cao
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      
+      // Vẽ nền trắng
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Vẽ ảnh
+      ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+      
+      // Trả về data URL với chất lượng cao
+      resolve({
+        dataUrl: canvas.toDataURL('image/jpeg', 1.0),
+        width: targetWidth,
+        height: targetHeight,
+        canvas: canvas
+      });
+    });
   };
 
+  // Hàm tạo PDF cải tiến
   const createPDF = async () => {
     if (images.length === 0) {
-      alert('Chua co anh nao de tao PDF!');
+      alert('Chưa có ảnh nào để tạo PDF!');
       return;
     }
 
     setIsLoading(true);
     
     try {
-      // 1. Lay kich thuoc cua tat ca anh
+      // Lấy kích thước của tất cả ảnh
       const imageSizes = await Promise.all(
         images.map(img => getImageDimensions(img.url))
       );
       
-      // 2. Tim chieu rong nho nhat
+      // Tìm chiều rộng nhỏ nhất
       const minWidth = Math.min(...imageSizes.map(size => size.width));
-      
-      // 3. Dat chuan: neu minWidth < 600 thi lay 600, con khong thi lay minWidth
       const STANDARD_WIDTH = Math.max(600, minWidth);
-      console.log('Chuan hoa ve chieu rong:', STANDARD_WIDTH);
+      
+      console.log('Chuẩn hóa về chiều rộng:', STANDARD_WIDTH);
       
       const { PDFDocument } = await import('pdf-lib');
       const pdfDoc = await PDFDocument.create();
 
+      // Xử lý từng ảnh một cách tuần tự để tránh lỗi
       for (let i = 0; i < images.length; i++) {
         const image = images[i];
         
-        // Load anh
-        const img = new Image();
-        img.src = image.url;
-        await new Promise((resolve, reject) => {
-          img.onload = resolve;
-          img.onerror = reject;
-          if (img.complete) resolve();
-        });
-
-        // Resize ve chieu rong chuan
-        const result = resizeImageToWidth(img, STANDARD_WIDTH);
+        console.log(`Đang xử lý ảnh ${i + 1}/${images.length}: ${image.name}`);
         
-        // Chuyen sang arrayBuffer
-        const response = await fetch(result.dataUrl);
-        const imageBytes = await response.arrayBuffer();
-        
-        // Embed anh vao PDF
-        let pdfImage;
         try {
-          pdfImage = await pdfDoc.embedJpg(imageBytes);
-        } catch (e) {
+          // Load ảnh
+          const img = new Image();
+          img.src = image.url;
+          
+          await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+            // Nếu ảnh đã load xong
+            if (img.complete && img.naturalWidth > 0) {
+              resolve();
+            }
+            // Timeout để tránh treo
+            setTimeout(() => reject(new Error('Timeout loading image')), 10000);
+          });
+
+          // Resize ảnh
+          const result = await resizeImageToWidth(img, STANDARD_WIDTH);
+          
+          // Chuyển đổi sang buffer
+          const response = await fetch(result.dataUrl);
+          const imageBytes = await response.arrayBuffer();
+          
+          // Embed ảnh vào PDF
+          let pdfImage;
           try {
-            pdfImage = await pdfDoc.embedPng(imageBytes);
-          } catch (e2) {
-            // Fallback: ve lai canvas
-            const canvas = document.createElement('canvas');
-            canvas.width = result.width;
-            canvas.height = result.height;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#FFFFFF';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(img, 0, 0, result.width, result.height);
-            const fallbackData = canvas.toDataURL('image/jpeg', 0.92);
-            const fallbackResponse = await fetch(fallbackData);
-            const fallbackBytes = await fallbackResponse.arrayBuffer();
-            pdfImage = await pdfDoc.embedJpg(fallbackBytes);
+            // Thử embed JPG trước
+            pdfImage = await pdfDoc.embedJpg(imageBytes);
+          } catch (embedError) {
+            console.warn('Không thể embed JPG, thử PNG:', embedError);
+            try {
+              // Thử embed PNG
+              pdfImage = await pdfDoc.embedPng(imageBytes);
+            } catch (pngError) {
+              console.warn('Không thể embed PNG, tạo lại ảnh:', pngError);
+              // Tạo lại ảnh với canvas mới
+              const canvas = document.createElement('canvas');
+              canvas.width = result.width;
+              canvas.height = result.height;
+              const ctx = canvas.getContext('2d');
+              ctx.fillStyle = '#FFFFFF';
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+              ctx.drawImage(img, 0, 0, result.width, result.height);
+              
+              const fallbackData = canvas.toDataURL('image/png', 1.0);
+              const fallbackResponse = await fetch(fallbackData);
+              const fallbackBytes = await fallbackResponse.arrayBuffer();
+              pdfImage = await pdfDoc.embedPng(fallbackBytes);
+            }
           }
+          
+          // Tạo trang với kích thước chính xác
+          const page = pdfDoc.addPage([result.width, result.height]);
+          page.drawImage(pdfImage, {
+            x: 0,
+            y: 0,
+            width: result.width,
+            height: result.height,
+          });
+          
+          console.log(`Đã xử lý ảnh ${i + 1}/${images.length}`);
+          
+        } catch (error) {
+          console.error(`Lỗi khi xử lý ảnh ${i + 1}:`, error);
+          // Vẫn tiếp tục với ảnh tiếp theo
         }
-        
-        // Tao trang voi kich thuoc da resize
-        const page = pdfDoc.addPage([result.width, result.height]);
-        page.drawImage(pdfImage, {
-          x: 0,
-          y: 0,
-          width: result.width,
-          height: result.height,
-        });
       }
 
-      // Luu PDF
+      // Lưu PDF
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
@@ -155,11 +186,13 @@ export default function HelloPage() {
       link.href = url;
       link.download = 'merged-images.pdf';
       link.click();
-      URL.revokeObjectURL(url);
+      
+      // Cleanup
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
       
     } catch (error) {
-      console.error('Loi tao PDF:', error);
-      alert('Co loi xay ra khi tao PDF: ' + error.message);
+      console.error('Lỗi tạo PDF:', error);
+      alert('Có lỗi xảy ra khi tạo PDF: ' + error.message);
     } finally {
       setIsLoading(false);
     }
@@ -173,10 +206,10 @@ export default function HelloPage() {
       margin: '0 auto'
     }}>
       <h1 style={{ fontSize: '36px', color: '#0070f3', textAlign: 'center' }}>
-        Ghep anh thanh PDF
+        Ghép ảnh thành PDF
       </h1>
       <p style={{ fontSize: '18px', color: '#666', textAlign: 'center', marginBottom: '30px' }}>
-        Keo tha anh vao de tao file PDF - Tu dong chuan hoa chieu rong
+        Kéo thả ảnh vào để tạo file PDF - Tự động chuẩn hóa chiều rộng
       </p>
 
       <div style={{
@@ -213,9 +246,9 @@ export default function HelloPage() {
           >
             <p style={{ fontSize: '48px', margin: '10px 0' }}>+</p>
             <p style={{ fontSize: '20px', color: '#333', fontWeight: 'bold' }}>
-              Keo tha anh vao day
+              Kéo thả ảnh vào đây
             </p>
-            <p style={{ fontSize: '14px', color: '#999' }}>hoac</p>
+            <p style={{ fontSize: '14px', color: '#999' }}>hoặc</p>
             
             <input
               type="file"
@@ -240,7 +273,7 @@ export default function HelloPage() {
                 marginTop: '10px'
               }}
             >
-              Chon anh tu may tinh
+              Chọn ảnh từ máy tính
             </button>
 
             {images.length > 0 && (
@@ -251,7 +284,7 @@ export default function HelloPage() {
                 borderRadius: '20px',
                 color: '#2e7d32'
               }}>
-                Da chon {images.length} anh
+                Đã chọn {images.length} ảnh
               </div>
             )}
           </div>
@@ -283,11 +316,11 @@ export default function HelloPage() {
                   e.currentTarget.style.transform = 'scale(1)';
                 }}
               >
-                {isLoading ? 'Dang xu ly...' : 'Tao PDF'}
+                {isLoading ? 'Đang xử lý...' : 'Tạo PDF'}
               </button>
               {isLoading && (
                 <p style={{ fontSize: '14px', color: '#666', marginTop: '10px' }}>
-                  Dang xu ly {images.length} anh...
+                  Đang xử lý {images.length} ảnh...
                 </p>
               )}
             </div>
@@ -301,7 +334,7 @@ export default function HelloPage() {
             borderBottom: '2px solid #e5e7eb',
             paddingBottom: '10px'
           }}>
-            Danh sach anh ({images.length})
+            Danh sách ảnh ({images.length})
           </h3>
           
           {images.length === 0 ? (
@@ -312,8 +345,8 @@ export default function HelloPage() {
               borderRadius: '8px',
               color: '#999'
             }}>
-              <p style={{ fontSize: '16px' }}>Chua co anh nao duoc chon</p>
-              <p style={{ fontSize: '14px' }}>Hay keo tha anh vao khung ben trai</p>
+              <p style={{ fontSize: '16px' }}>Chưa có ảnh nào được chọn</p>
+              <p style={{ fontSize: '14px' }}>Hãy kéo thả ảnh vào khung bên trái</p>
             </div>
           ) : (
             <div style={{
@@ -394,7 +427,7 @@ export default function HelloPage() {
                       opacity: isLoading ? 0.5 : 1
                     }}
                   >
-                    X
+                    ×
                   </button>
                 </div>
               ))}
@@ -416,7 +449,7 @@ export default function HelloPage() {
                     opacity: isLoading ? 0.5 : 1
                   }}
                 >
-                  Xoa tat ca ({images.length} anh)
+                  Xóa tất cả ({images.length} ảnh)
                 </button>
               )}
             </div>
