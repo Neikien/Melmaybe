@@ -1,281 +1,495 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import Image from "next/image";
-import LoginModal from "@/components/LoginModal";
-// Không dùng apiService mặc định nữa để tùy chỉnh limit
-// import { apiService } from "@/lib/api";
+import { useState } from 'react';
 
-export default function Home() {
-  // --- 1. LOGIC SLIDER HERO ---
-  const [currentSlide, setCurrentSlide] = useState(0);
-  const slides = [
-    "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=1920&q=80",
-    "https://images.unsplash.com/photo-1565538810643-b5bdb714032a?q=80&w=1920&auto=format&fit=crop",
-    "https://images.unsplash.com/photo-1544161515-4ab6ce6db874?q=80&w=1920&auto=format&fit=crop",
-  ];
+// Các bộ dữ liệu mẫu để demo nhanh trên lớp
+const PRESETS = [
+  {
+    name: 'Ví dụ chuẩn trên Slide (A, C, C, G)',
+    seqs: { L1: 'A', L2: 'C', L3: 'C', L4: 'G' },
+    topology: '((L1,L2),(L3,L4))',
+  },
+  {
+    name: 'Ví dụ có đột biến (A, A, G, G)',
+    seqs: { L1: 'A', L2: 'A', L3: 'G', L4: 'G' },
+    topology: '((L1,L2),(L3,L4))',
+  },
+  {
+    name: 'Ví dụ xung đột toàn bộ (A, C, G, T)',
+    seqs: { L1: 'A', L2: 'C', L3: 'G', L4: 'T' },
+    topology: '((L1,L2),(L3,L4))',
+  },
+  {
+    name: 'Ví dụ đa vị trí - 4 cột (ACGT vs AGGT...)',
+    seqs: { L1: 'ACGA', L2: 'ACGT', L3: 'AGCA', L4: 'GGGT' },
+    topology: '((L1,L2),(L3,L4))',
+  },
+];
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % slides.length);
-    }, 6000);
-    return () => clearInterval(interval);
-  }, [slides.length]);
+// Hàm giải thuật toán Fitch cho 1 cột (site) trên cây 4 lá
+function solveFitchSingleSite(leaves, topology) {
+  // Sắp xếp thứ tự 4 lá theo cấu trúc cây được chọn
+  let order = ['L1', 'L2', 'L3', 'L4'];
+  if (topology === '((L1,L3),(L2,L4))') order = ['L1', 'L3', 'L2', 'L4'];
+  if (topology === '((L1,L4),(L2,L3))') order = ['L1', 'L4', 'L2', 'L3'];
 
-  // --- 2. LOGIC TABS (HIỂN THỊ ĐẦY ĐỦ KHÁCH SẠN) ---
-  // Mở rộng danh sách ảnh để đủ cho 6 khách sạn (Hà Nội, Đà Nẵng, Nha Trang, Đà Lạt, HCM, Phú Quốc)
-  const hardcodedImages = [
-    "https://digital.ihg.com/is/image/ihg/ic-brand-refresh-homepg-hero-box-carousel-1-lvp-1440x636", // 1. Hà Nội
-    "https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?q=80&w=1600", // 2. Đà Nẵng (Biển)
-    "https://digital.ihg.com/is/image/ihg/ic-brand-refresh-homepg-hero-box-carousel-3-lvp-1440x636", // 3. Nha Trang
-    "https://images.unsplash.com/photo-1548574505-5e239809ee19?q=80&w=1600", // 4. Đà Lạt (Rừng)
-    "https://images.unsplash.com/photo-1565538810643-b5bdb714032a?q=80&w=1600", // 5. TP.HCM (City)
-    "https://images.unsplash.com/photo-1582719508461-905c673771fd?q=80&w=1600", // 6. Phú Quốc (Resort)
-  ];
+  const [a, b, c, d] = order;
+  const setA = new Set([leaves[a]]);
+  const setB = new Set([leaves[b]]);
+  const setC = new Set([leaves[c]]);
+  const setD = new Set([leaves[d]]);
 
-  const [featuredHotels, setFeaturedHotels] = useState([]);
-  const [activeTabId, setActiveTabId] = useState(null);
+  // Pha 1: Bottom-Up (Hậu thứ tự)
+  const intersect = (s1, s2) => new Set([...s1].filter((x) => s2.has(x)));
+  const union = (s1, s2) => new Set([...s1, ...s2]);
 
-  useEffect(() => {
-    const fetchFeaturedHotels = async () => {
-      try {
-        // GỌI TRỰC TIẾP API VỚI LIMIT=100 ĐỂ LẤY HẾT DATA
-        const res = await fetch(
-          "https://khachsan-backend-production-9810.up.railway.app/hotels/?skip=0&limit=100"
-        );
-        if (!res.ok) throw new Error("Failed to fetch hotels");
+  // Nút trung gian trái (U)
+  const interU = intersect(setA, setB);
+  const isInterU = interU.size > 0;
+  const setU = isInterU ? interU : union(setA, setB);
+  const costU = isInterU ? 0 : 1;
 
-        const data = await res.json();
+  // Nút trung gian phải (V)
+  const interV = intersect(setC, setD);
+  const isInterV = interV.size > 0;
+  const setV = isInterV ? interV : union(setC, setD);
+  const costV = isInterV ? 0 : 1;
 
-        // Map dữ liệu và KHÔNG DÙNG .slice() nữa để lấy hết
-        const allHotels = data.map((hotel, index) => ({
-          id: hotel.MaKS || hotel.id,
-          name: hotel.TenKhachSan || hotel.TenKS || hotel.name, // Thử nhiều trường tên phòng khi API trả về khác nhau
-          // Lấy ảnh theo thứ tự, nếu hết ảnh thì quay vòng lại (index % length)
-          image:
-            hardcodedImages[index % hardcodedImages.length] || hotel.HinhAnh,
-          location: hotel.DiaChi || "Luxury Location",
-          desc:
-            hotel.MoTa ||
-            "Experience the untouched nature with luxury amenities.",
-        }));
+  // Nút gốc (Root)
+  const interR = intersect(setU, setV);
+  const isInterR = interR.size > 0;
+  const setR = isInterR ? interR : union(setU, setV);
+  const costR = isInterR ? 0 : 1;
 
-        setFeaturedHotels(allHotels);
+  const totalScore = costU + costV + costR;
 
-        // Mặc định chọn tab đầu tiên
-        if (allHotels.length > 0) setActiveTabId(allHotels[0].id);
-      } catch (error) {
-        console.error("Lỗi API:", error);
-      }
+  // Pha 2: Top-Down (Tiền thứ tự)
+  const finalR = [...setR][0];
+  const finalU = setU.has(finalR) ? finalR : [...setU][0];
+  const finalV = setV.has(finalR) ? finalR : [...setV][0];
+
+  return {
+    order,
+    leaves: {
+      [a]: leaves[a],
+      [b]: leaves[b],
+      [c]: leaves[c],
+      [d]: leaves[d],
+    },
+    U: { set: [...setU], op: isInterU ? 'Giao (∩)' : 'Hợp (∪)', cost: costU, final: finalU },
+    V: { set: [...setV], op: isInterV ? 'Giao (∩)' : 'Hợp (∪)', cost: costV, final: finalV },
+    Root: { set: [...setR], op: isInterR ? 'Giao (∩)' : 'Hợp (∪)', cost: costR, final: finalR },
+    totalScore,
+  };
+}
+
+export default function FitchSimulatorPage() {
+  const [seqs, setSeqs] = useState({ L1: 'A', L2: 'C', L3: 'C', L4: 'G' });
+  const [topology, setTopology] = useState('((L1,L2),(L3,L4))');
+  const [selectedSite, setSelectedSite] = useState(0);
+  const [step, setStep] = useState(5); // Mặc định hiển thị đầy đủ, có thể bấm reset để chạy từng bước
+
+  // Chuẩn hóa độ dài chuỗi
+  const maxLen = Math.max(
+    1,
+    seqs.L1.length,
+    seqs.L2.length,
+    seqs.L3.length,
+    seqs.L4.length
+  );
+
+  const handleSeqChange = (key, value) => {
+    // Chỉ cho phép chữ cái in hoa (A, T, C, G, U hoặc ký tự đặc trưng)
+    const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+    setSeqs((prev) => ({ ...prev, [key]: cleaned }));
+    setSelectedSite(0);
+  };
+
+  const applyPreset = (preset) => {
+    setSeqs(preset.seqs);
+    setTopology(preset.topology);
+    setSelectedSite(0);
+    setStep(5);
+  };
+
+  // Tính kết quả cho toàn bộ các cột (Multi-site)
+  const allSitesResults = [];
+  for (let i = 0; i < maxLen; i++) {
+    const siteLeaves = {
+      L1: seqs.L1[i] || '-',
+      L2: seqs.L2[i] || '-',
+      L3: seqs.L3[i] || '-',
+      L4: seqs.L4[i] || '-',
     };
+    allSitesResults.push(solveFitchSingleSite(siteLeaves, topology));
+  }
 
-    fetchFeaturedHotels();
-  }, []);
+  const grandTotalScore = allSitesResults.reduce((acc, item) => acc + item.totalScore, 0);
+  const currentRes = allSitesResults[selectedSite] || allSitesResults[0];
+  const [leaf1, leaf2, leaf3, leaf4] = currentRes.order;
 
-  const activeHotel =
-    featuredHotels.find((h) => h.id === activeTabId) || featuredHotels[0];
-
-  // --- 3. LOGIC POPUP LOGIN ---
-  const [isLoginOpen, setIsLoginOpen] = useState(false);
+  // Mô tả chi tiết từng bước để thuyết trình
+  const stepDescriptions = [
+    'Bước 0: Khởi tạo trạng thái tại 4 nút lá từ cột dữ liệu (Site) đang chọn.',
+    `Bước 1 (Pha 1 - Bottom-Up nút U): Xét ${leaf1} {${currentRes.leaves[leaf1]}} và ${leaf2} {${currentRes.leaves[leaf2]}} ➔ Dùng phép ${currentRes.U.op} được {${currentRes.U.set.join(', ')}} (Chi phí +${currentRes.U.cost}).`,
+    `Bước 2 (Pha 1 - Bottom-Up nút V): Xét ${leaf3} {${currentRes.leaves[leaf3]}} và ${leaf4} {${currentRes.leaves[leaf4]}} ➔ Dùng phép ${currentRes.V.op} được {${currentRes.V.set.join(', ')}} (Chi phí +${currentRes.V.cost}).`,
+    `Bước 3 (Pha 1 - Bottom-Up nút Gốc): Xét U {${currentRes.U.set.join(', ')}} và V {${currentRes.V.set.join(', ')}} ➔ Dùng phép ${currentRes.Root.op} được {${currentRes.Root.set.join(', ')}} (Chi phí +${currentRes.Root.cost}). Tổng điểm cột này = ${currentRes.totalScore}.`,
+    `Bước 4 (Pha 2 - Top-Down chốt Gốc): Từ tập {${currentRes.Root.set.join(', ')}}, chọn trạng thái "${currentRes.Root.final}" cho nút Gốc.`,
+    `Bước 5 (Pha 2 - Top-Down hoàn tất): Kế thừa từ Gốc xuống ➔ Nút U chốt "${currentRes.U.final}", Nút V chốt "${currentRes.V.final}". Hoàn thành tái dựng tổ tiên!`,
+  ];
 
   return (
-    <main className="min-h-screen bg-white">
-      <LoginModal isOpen={isLoginOpen} onClose={() => setIsLoginOpen(false)} />
+    <div
+      style={{
+        padding: '32px 24px',
+        fontFamily: 'Arial, sans-serif',
+        maxWidth: '1350px',
+        margin: '0 auto',
+        color: '#1e293b',
+      }}
+    >
+      <h1 style={{ fontSize: '32px', color: '#0f172a', textAlign: 'center', marginBottom: '8px' }}>
+        Mô phỏng Tương tác Thuật toán Fitch (Maximum Parsimony)
+      </h1>
+      <p style={{ fontSize: '16px', color: '#64748b', textAlign: 'center', marginBottom: '28px' }}>
+        Nhập dữ liệu chuỗi sinh học hoặc chọn cấu trúc cây để quan sát quá trình duyệt 2 pha (Bottom-Up & Top-Down)
+      </p>
 
-      {/* 1. HERO SECTION */}
-      <div className="relative h-[85vh] w-full overflow-hidden bg-gray-900">
-        <Image
-          src={slides[currentSlide]}
-          alt="Hero Background"
-          fill
-          priority
-          className="object-cover transition-opacity duration-1000"
-        />
-        <div className="absolute inset-0 bg-black/30"></div>
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-center text-white px-5 z-10 mt-[-40px]">
-          <h1 className="font-serif text-6xl md:text-8xl lg:text-9xl leading-none mb-6 animate-fade-in-up">
-            The <br /> InterContinental Life
-          </h1>
-          <p className="text-base md:text-xl font-light tracking-[3px] max-w-xl opacity-90 animate-fade-in-up delay-200 uppercase">
-            Luxury without limits.
-          </p>
-        </div>
+      {/* Thanh chọn nhanh ví dụ mẫu */}
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '10px',
+          justifyContent: 'center',
+          marginBottom: '24px',
+        }}
+      >
+        {PRESETS.map((p, idx) => (
+          <button
+            key={idx}
+            onClick={() => applyPreset(p)}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#f1f5f9',
+              color: '#334155',
+              border: '1px solid #cbd5e1',
+              borderRadius: '20px',
+              fontSize: '13px',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+            }}
+          >
+            {p.name}
+          </button>
+        ))}
       </div>
 
-      {/* 2. INTRO TEXT */}
-      <section className="pt-20 pb-12 px-5">
-        <div className="max-w-[90%] mx-auto text-left">
-          <h1 className="font-serif text-4xl lg:text-5xl text-primary mb-6 leading-tight">
-            Opening Doors to a <br /> World of Fascination
-          </h1>
-          <p className="text-lg text-secondary max-w-4xl mb-10 leading-relaxed font-light">
-            We believe travel is more than a destination. It’s a journey that
-            expands minds, connects cultures, and ignites possibilities. As the
-            pioneers of luxury travel, InterContinental Hotels & Resorts invites
-            you into a world where extraordinary things happen.
-          </p>
-          <h2 className="font-serif text-2xl text-primary border-b border-gray-200 pb-3 inline-block">
-            Discover indulgent escapes in remarkable destinations
-          </h2>
-        </div>
-      </section>
+      {/* Bố cục 2 cột chính giống trang của bạn */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1.4fr',
+          gap: '28px',
+          alignItems: 'start',
+        }}
+      >
+        {/* CỘT TRÁI: Nhập dữ liệu & Cấu hình cây */}
+        <div
+          style={{
+            backgroundColor: '#f8fafc',
+            padding: '24px',
+            borderRadius: '12px',
+            border: '1px solid #e2e8f0',
+          }}
+        >
+          <h3 style={{ margin: '0 0 16px 0', color: '#0f172a', borderBottom: '2px solid #e2e8f0', paddingBottom: '10px' }}>
+            1. Dữ liệu đầu vào (Character Data)
+          </h3>
 
-      {/* 3. TABS SECTION */}
-      <section className="pb-16 px-5">
-        <div className="max-w-[90%] mx-auto">
-          {/* Tabs Menu - Hiển thị danh sách ngang */}
-          <div className="flex flex-wrap justify-center gap-x-8 gap-y-4 mb-8 border-b border-gray-100 pb-2">
-            {featuredHotels.length > 0 ? (
-              featuredHotels.map((hotel) => (
-                <button
-                  key={hotel.id}
-                  onClick={() => setActiveTabId(hotel.id)}
-                  className={`pb-3 text-sm font-medium uppercase tracking-[2px] transition-all whitespace-nowrap ${
-                    activeTabId === hotel.id
-                      ? "text-primary border-b-2 border-accent"
-                      : "text-gray-400 hover:text-primary"
-                  }`}
-                >
-                  {hotel.name}
-                </button>
-              ))
-            ) : (
-              <div className="text-gray-400 text-sm pb-3">
-                Loading hotels...
-              </div>
-            )}
-          </div>
-
-          {/* Tab Content */}
-          <div className="relative w-full h-[600px] bg-gray-100 overflow-hidden group">
-            {activeHotel && (
-              <>
-                <Image
-                  src={activeHotel.image}
-                  alt={activeHotel.name || "Hotel Image"}
-                  fill
-                  className="object-cover transition-transform duration-700"
-                />
-                <div className="absolute top-1/2 right-10 lg:right-20 transform -translate-y-1/2 bg-white p-10 lg:p-14 max-w-md shadow-xl z-10">
-                  <div className="text-xs font-bold text-gray-400 tracking-[3px] mb-4 uppercase">
-                    {activeHotel.location}
-                  </div>
-                  <h3 className="font-serif text-3xl lg:text-4xl text-primary mb-6 leading-tight">
-                    {activeHotel.name}
-                  </h3>
-                  <p className="text-secondary mb-8 font-light text-sm leading-relaxed line-clamp-3">
-                    {activeHotel.desc}
-                  </p>
-                  <a
-                    href={`/rooms?hotel_id=${activeHotel.id}`}
-                    className="text-sm font-bold text-accent uppercase tracking-widest border-b border-accent pb-1 hover:text-primary hover:border-primary transition-colors"
-                  >
-                    Explore Hotel
-                  </a>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </section>
-
-      {/* 4. SPA SECTION */}
-      <section className="py-12 bg-white">
-        <div className="max-w-[90%] mx-auto flex flex-col lg:flex-row h-auto lg:h-[650px]">
-          <div className="lg:w-1/2 bg-[#f9f9f9] flex flex-col justify-center p-10 lg:p-20 text-left order-2 lg:order-1">
-            <span className="block text-xs font-bold text-gray-500 tracking-[4px] mb-6">
-              REJUVENATE YOUR SENSES
-            </span>
-            <h2 className="font-serif text-4xl lg:text-5xl text-primary mb-8 leading-tight">
-              Angsana Spa Signatures
-            </h2>
-            <p className="text-lg text-secondary font-light leading-loose mb-10">
-              Unlock exclusive insider access to the world’s most celebrated
-              wellness moments. We invite you behind the scenes of incredible
-              experiences with moments of cultural discovery.
-            </p>
-            <a
-              href="/spa"
-              className="inline-block border border-primary px-10 py-4 text-sm font-bold tracking-[2px] uppercase hover:bg-primary hover:text-white transition-all w-fit"
+          {(['L1', 'L2', 'L3', 'L4']).map((label, idx) => (
+            <div
+              key={label}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                marginBottom: '12px',
+              }}
             >
-              Discover More
-            </a>
+              <span
+                style={{
+                  width: '75px',
+                  fontWeight: 'bold',
+                  color: '#2563eb',
+                  fontSize: '15px',
+                }}
+              >
+                Loài {idx + 1} ({label}):
+              </span>
+              <input
+                type="text"
+                value={seqs[label]}
+                onChange={(e) => handleSeqChange(label, e.target.value)}
+                placeholder="VD: ACGT"
+                style={{
+                  flex: 1,
+                  padding: '10px 14px',
+                  fontSize: '16px',
+                  fontFamily: 'monospace',
+                  letterSpacing: '3px',
+                  fontWeight: 'bold',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  backgroundColor: 'white',
+                }}
+              />
+            </div>
+          ))}
+
+          <div style={{ marginTop: '20px' }}>
+            <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px', color: '#0f172a' }}>
+              2. Chọn cấu trúc cây (Topology - Small Parsimony):
+            </label>
+            <select
+              value={topology}
+              onChange={(e) => setTopology(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                fontSize: '15px',
+                borderRadius: '8px',
+                border: '1px solid #cbd5e1',
+                backgroundColor: 'white',
+                fontWeight: 'bold',
+              }}
+            >
+              <option value="((L1,L2),(L3,L4))">Cây 1: ((Loài 1, Loài 2), (Loài 3, Loài 4))</option>
+              <option value="((L1,L3),(L2,L4))">Cây 2: ((Loài 1, Loài 3), (Loài 2, Loài 4))</option>
+              <option value="((L1,L4),(L2,L3))">Cây 3: ((Loài 1, Loài 4), (Loài 2, Loài 3))</option>
+            </select>
           </div>
 
-          <div className="lg:w-1/2 relative h-[400px] lg:h-full order-1 lg:order-2">
-            <div className="flex gap-0 h-full w-full">
-              <Image
-                src="https://images.unsplash.com/photo-1544161515-4ab6ce6db874?q=80&w=1200&auto=format&fit=crop"
-                alt="Spa"
-                fill
-                className="object-cover"
-              />
+          {/* Bảng tổng hợp đa vị trí (Multi-site) */}
+          <div style={{ marginTop: '24px' }}>
+            <h4 style={{ margin: '0 0 10px 0', color: '#334155' }}>
+              3. Phân tích từng cột (Site Pattern) — Bấm vào cột để xem cây:
+            </h4>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {allSitesResults.map((res, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setSelectedSite(idx)}
+                  style={{
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    border: selectedSite === idx ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                    backgroundColor: selectedSite === idx ? '#eff6ff' : 'white',
+                    cursor: 'pointer',
+                    textAlign: 'center',
+                  }}
+                >
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Cột {idx + 1}</div>
+                  <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#0f172a', margin: '4px 0' }}>
+                    {seqs.L1[idx] || '-'}{seqs.L2[idx] || '-'}{seqs.L3[idx] || '-'}{seqs.L4[idx] || '-'}
+                  </div>
+                  <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#dc2626' }}>
+                    +{res.totalScore} điểm
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div
+              style={{
+                marginTop: '20px',
+                padding: '16px',
+                backgroundColor: '#0f172a',
+                color: 'white',
+                borderRadius: '10px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <span style={{ fontSize: '16px' }}>Tổng Parsimony Score toàn chuỗi:</span>
+              <span style={{ fontSize: '26px', fontWeight: 'bold', color: '#38bdf8' }}>
+                {grandTotalScore} đột biến
+              </span>
             </div>
           </div>
         </div>
-      </section>
 
-      {/* 5. EXPERIENCE SECTION */}
-      <section className="py-12 bg-white">
-        <div className="max-w-[90%] mx-auto flex flex-col lg:flex-row h-auto lg:h-[650px]">
-          <div className="lg:w-1/2 relative h-[400px] lg:h-full">
-            <Image
-              src="https://images.unsplash.com/photo-1519823551278-64ac92734fb1?q=80&w=1200"
-              alt="Rainmist Experience"
-              fill
-              className="object-cover"
-            />
+        {/* CỘT PHẢI: Trực quan hóa sơ đồ cây & Chạy từng bước */}
+        <div
+          style={{
+            backgroundColor: '#0f172a',
+            color: '#f8fafc',
+            padding: '24px',
+            borderRadius: '12px',
+            boxShadow: '0 10px 25px rgba(15, 23, 42, 0.15)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h3 style={{ margin: 0, color: '#38bdf8' }}>
+              Mô phỏng Cây tiến hóa — Cột #{selectedSite + 1}
+            </h3>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => setStep(0)}
+                style={{
+                  padding: '8px 14px',
+                  backgroundColor: '#334155',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold',
+                }}
+              >
+                Chạy lại từ đầu (Bước 0)
+              </button>
+              <button
+                onClick={() => setStep((s) => Math.min(5, s + 1))}
+                disabled={step >= 5}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: step >= 5 ? '#475569' : '#2563eb',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: step >= 5 ? 'not-allowed' : 'pointer',
+                  fontWeight: 'bold',
+                }}
+              >
+                Bước tiếp theo ➡️
+              </button>
+            </div>
           </div>
 
-          <div className="lg:w-1/2 bg-[#f9f9f9] flex flex-col justify-center p-10 lg:p-20 text-left">
-            <span className="block text-xs font-bold text-gray-500 tracking-[4px] mb-6">
-              THE RAINMIST EXPERIENCE
-            </span>
-            <h2 className="font-serif text-4xl lg:text-5xl text-primary mb-8 leading-tight">
-              A Journey for the Soul
-            </h2>
-            <p className="text-lg text-secondary font-light leading-loose mb-10">
-              Feel the healing power of the rainforest with our signature
-              Rainmist Experience. Refresh the mind under the calming beat of
-              cascading rain showers, and restore the soul.
-            </p>
-            <a
-              href="/experience/rainmist"
-              className="inline-block border border-primary px-10 py-4 text-sm font-bold tracking-[2px] uppercase hover:bg-primary hover:text-white transition-all w-fit"
-            >
-              Find Out More
-            </a>
+          {/* Hộp giải thích trạng thái hiện tại */}
+          <div
+            style={{
+              backgroundColor: '#1e293b',
+              padding: '14px 18px',
+              borderRadius: '8px',
+              borderLeft: '4px solid #38bdf8',
+              marginBottom: '20px',
+              fontSize: '15px',
+              lineHeight: '1.5',
+              minHeight: '48px',
+            }}
+          >
+            {stepDescriptions[step]}
           </div>
+
+          {/* Sơ đồ cây SVG trực quan */}
+          <svg viewBox="0 0 600 360" style={{ width: '100%', height: 'auto', backgroundColor: '#1e293b', borderRadius: '10px' }}>
+            {/* Các nhánh nối */}
+            {/* Gốc -> U và V */}
+            <line x1="300" y1="65" x2="160" y2="175" stroke={step >= 3 ? '#38bdf8' : '#475569'} strokeWidth="4" />
+            <line x1="300" y1="65" x2="440" y2="175" stroke={step >= 3 ? '#38bdf8' : '#475569'} strokeWidth="4" />
+
+            {/* U -> Leaf 1 và Leaf 2 */}
+            <line x1="160" y1="175" x2="80" y2="295" stroke={step >= 1 ? '#38bdf8' : '#475569'} strokeWidth="4" />
+            <line x1="160" y1="175" x2="240" y2="295" stroke={step >= 1 ? '#38bdf8' : '#475569'} strokeWidth="4" />
+
+            {/* V -> Leaf 3 và Leaf 4 */}
+            <line x1="440" y1="175" x2="360" y2="295" stroke={step >= 2 ? '#38bdf8' : '#475569'} strokeWidth="4" />
+            <line x1="440" y1="175" x2="520" y2="295" stroke={step >= 2 ? '#38bdf8' : '#475569'} strokeWidth="4" />
+
+            {/* NÚT GỐC (ROOT) */}
+            <g transform="translate(300, 65)">
+              <rect
+                x="-65"
+                y="-28"
+                width="130"
+                height="56"
+                rx="10"
+                fill={step >= 4 ? '#0284c7' : step >= 3 ? '#334155' : '#0f172a'}
+                stroke={step >= 3 ? '#38bdf8' : '#64748b'}
+                strokeWidth="3"
+              />
+              <text x="0" y="-6" textAnchor="middle" fill="#cbd5e1" fontSize="12" fontWeight="bold">
+                GỐC (Root)
+              </text>
+              <text x="0" y="16" textAnchor="middle" fill="white" fontSize="16" fontWeight="bold">
+                {step < 3
+                  ? '?'
+                  : step === 3
+                  ? `{${currentRes.Root.set.join(',')}} (+${currentRes.Root.cost})`
+                  : `Chốt: ${currentRes.Root.final} (+${currentRes.Root.cost})`}
+              </text>
+            </g>
+
+            {/* NÚT TRUNG GIAN TRÁI (U) */}
+            <g transform="translate(160, 175)">
+              <rect
+                x="-65"
+                y="-28"
+                width="130"
+                height="56"
+                rx="10"
+                fill={step >= 5 ? '#0284c7' : step >= 1 ? '#334155' : '#0f172a'}
+                stroke={step >= 1 ? '#38bdf8' : '#64748b'}
+                strokeWidth="3"
+              />
+              <text x="0" y="-6" textAnchor="middle" fill="#cbd5e1" fontSize="12" fontWeight="bold">
+                Tổ tiên U ({currentRes.U.op})
+              </text>
+              <text x="0" y="16" textAnchor="middle" fill="white" fontSize="15" fontWeight="bold">
+                {step < 1
+                  ? '?'
+                  : step < 5
+                  ? `{${currentRes.U.set.join(',')}} (+${currentRes.U.cost})`
+                  : `Chốt: ${currentRes.U.final} (+${currentRes.U.cost})`}
+              </text>
+            </g>
+
+            {/* NÚT TRUNG GIAN PHẢI (V) */}
+            <g transform="translate(440, 175)">
+              <rect
+                x="-65"
+                y="-28"
+                width="130"
+                height="56"
+                rx="10"
+                fill={step >= 5 ? '#0284c7' : step >= 2 ? '#334155' : '#0f172a'}
+                stroke={step >= 2 ? '#38bdf8' : '#64748b'}
+                strokeWidth="3"
+              />
+              <text x="0" y="-6" textAnchor="middle" fill="#cbd5e1" fontSize="12" fontWeight="bold">
+                Tổ tiên V ({currentRes.V.op})
+              </text>
+              <text x="0" y="16" textAnchor="middle" fill="white" fontSize="15" fontWeight="bold">
+                {step < 2
+                  ? '?'
+                  : step < 5
+                  ? `{${currentRes.V.set.join(',')}} (+${currentRes.V.cost})`
+                  : `Chốt: ${currentRes.V.final} (+${currentRes.V.cost})`}
+              </text>
+            </g>
+
+            {/* 4 NÚT LÁ */}
+            {[
+              { x: 80, label: leaf1, val: currentRes.leaves[leaf1] },
+              { x: 240, label: leaf2, val: currentRes.leaves[leaf2] },
+              { x: 360, label: leaf3, val: currentRes.leaves[leaf3] },
+              { x: 520, label: leaf4, val: currentRes.leaves[leaf4] },
+            ].map((leaf, i) => (
+              <g key={i} transform={`translate(${leaf.x}, 295)`}>
+                <rect x="-42" y="-24" width="84" height="48" rx="8" fill="#0f172a" stroke="#94a3b8" strokeWidth="2" />
+                <text x="0" y="-4" textAnchor="middle" fill="#94a3b8" fontSize="12" fontWeight="bold">
+                  {leaf.label}
+                </text>
+                <text x="0" y="16" textAnchor="middle" fill="#38bdf8" fontSize="18" fontWeight="bold">
+                  {`{${leaf.val}}`}
+                </text>
+              </g>
+            ))}
+          </svg>
         </div>
-      </section>
-
-      {/* 6. AMBASSADOR SECTION */}
-      <section className="py-8 bg-white">
-        <div className="max-w-[96%] mx-auto relative lg:h-[700px] flex flex-col lg:block">
-          <Image
-            src="https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?q=80&w=1920&auto=format&fit=crop"
-            alt="Ambassador"
-            fill
-            className="object-cover relative lg:absolute inset-0 h-[500px] lg:h-full w-full"
-          />
-          <div className="relative lg:absolute top-0 lg:top-1/2 right-0 lg:right-[8%] lg:transform lg:-translate-y-1/2 bg-white p-10 lg:p-16 max-w-xl shadow-none lg:shadow-xl mt-[-50px] lg:mt-0 mx-5 lg:mx-0 border border-gray-100 lg:border-none">
-            <h2 className="font-serif text-3xl lg:text-4xl text-primary mb-6 leading-tight">
-              InterContinental <br /> Ambassador
-            </h2>
-            <p className="text-base text-secondary font-light leading-loose mb-8">
-              Turn every trip into something extraordinary. Elevate your stay
-              with our loyalty program and take advantage of exclusive benefits
-              available at over 220 destinations worldwide.
-            </p>
-            <a
-              href="/ambassador"
-              className="inline-block border border-primary px-8 py-4 text-[10px] font-bold tracking-[2px] uppercase hover:bg-primary hover:text-white transition-all"
-            >
-              More Rewards
-            </a>
-          </div>
-        </div>
-      </section>
-    </main>
+      </div>
+    </div>
   );
 }
