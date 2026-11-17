@@ -28,7 +28,6 @@ const PRESETS = [
 
 // Hàm giải thuật toán Fitch cho 1 cột (site) trên cây 4 lá
 function solveFitchSingleSite(leaves, topology) {
-  // Sắp xếp thứ tự 4 lá theo cấu trúc cây được chọn
   let order = ['L1', 'L2', 'L3', 'L4'];
   if (topology === '((L1,L3),(L2,L4))') order = ['L1', 'L3', 'L2', 'L4'];
   if (topology === '((L1,L4),(L2,L3))') order = ['L1', 'L4', 'L2', 'L3'];
@@ -87,7 +86,10 @@ export default function FitchSimulatorPage() {
   const [seqs, setSeqs] = useState({ L1: 'A', L2: 'C', L3: 'C', L4: 'G' });
   const [topology, setTopology] = useState('((L1,L2),(L3,L4))');
   const [selectedSite, setSelectedSite] = useState(0);
-  const [step, setStep] = useState(5); // Mặc định hiển thị đầy đủ, có thể bấm reset để chạy từng bước
+  const [step, setStep] = useState(5);
+  
+  // State để lưu thông báo lỗi khi nhập sai ký tự
+  const [errorMsg, setErrorMsg] = useState('');
 
   // Chuẩn hóa độ dài chuỗi
   const maxLen = Math.max(
@@ -99,8 +101,19 @@ export default function FitchSimulatorPage() {
   );
 
   const handleSeqChange = (key, value) => {
-    // Chỉ cho phép chữ cái in hoa (A, T, C, G, U hoặc ký tự đặc trưng)
-    const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+    const upperVal = value.toUpperCase();
+    // Kiểm tra xem có chứa ký tự nào không phải A, T, C, G không
+    const invalidCharRegex = /[^ATCG]/;
+    
+    if (invalidCharRegex.test(upperVal)) {
+      setErrorMsg('⚠️ Chỉ được phép nhập các ký tự A, T, C, G!');
+    } else {
+      setErrorMsg('');
+    }
+
+    // Lọc bỏ hoàn toàn các ký tự khác ngoài A, T, C, G, giới hạn tối đa 12 ký tự
+    const cleaned = upperVal.replace(/[^ATCG]/g, '').slice(0, 12);
+    
     setSeqs((prev) => ({ ...prev, [key]: cleaned }));
     setSelectedSite(0);
   };
@@ -110,9 +123,9 @@ export default function FitchSimulatorPage() {
     setTopology(preset.topology);
     setSelectedSite(0);
     setStep(5);
+    setErrorMsg('');
   };
 
-  // Tính kết quả cho toàn bộ các cột (Multi-site)
   const allSitesResults = [];
   for (let i = 0; i < maxLen; i++) {
     const siteLeaves = {
@@ -128,7 +141,6 @@ export default function FitchSimulatorPage() {
   const currentRes = allSitesResults[selectedSite] || allSitesResults[0];
   const [leaf1, leaf2, leaf3, leaf4] = currentRes.order;
 
-  // Mô tả chi tiết từng bước để thuyết trình
   const stepDescriptions = [
     'Bước 0: Khởi tạo trạng thái tại 4 nút lá từ cột dữ liệu (Site) đang chọn.',
     `Bước 1 (Pha 1 - Bottom-Up nút U): Xét ${leaf1} {${currentRes.leaves[leaf1]}} và ${leaf2} {${currentRes.leaves[leaf2]}} ➔ Dùng phép ${currentRes.U.op} được {${currentRes.U.set.join(', ')}} (Chi phí +${currentRes.U.cost}).`,
@@ -152,7 +164,7 @@ export default function FitchSimulatorPage() {
         Mô phỏng Tương tác Thuật toán Fitch (Maximum Parsimony)
       </h1>
       <p style={{ fontSize: '16px', color: '#64748b', textAlign: 'center', marginBottom: '28px' }}>
-        Nhập dữ liệu chuỗi sinh học hoặc chọn cấu trúc cây để quan sát quá trình duyệt 2 pha (Bottom-Up & Top-Down)
+        Nhập dữ liệu chuỗi sinh học (chỉ nhận A, T, C, G) hoặc chọn cấu trúc cây để quan sát quá trình duyệt 2 pha
       </p>
 
       {/* Thanh chọn nhanh ví dụ mẫu */}
@@ -185,7 +197,7 @@ export default function FitchSimulatorPage() {
         ))}
       </div>
 
-      {/* Bố cục 2 cột chính giống trang của bạn */}
+      {/* Bố cục 2 cột chính */}
       <div
         style={{
           display: 'grid',
@@ -206,6 +218,23 @@ export default function FitchSimulatorPage() {
           <h3 style={{ margin: '0 0 16px 0', color: '#0f172a', borderBottom: '2px solid #e2e8f0', paddingBottom: '10px' }}>
             1. Dữ liệu đầu vào (Character Data)
           </h3>
+
+          {errorMsg && (
+            <div
+              style={{
+                backgroundColor: '#fef2f2',
+                color: '#dc2626',
+                padding: '10px 14px',
+                borderRadius: '8px',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                marginBottom: '16px',
+                border: '1px solid #fecaca',
+              }}
+            >
+              {errorMsg}
+            </div>
+          )}
 
           {(['L1', 'L2', 'L3', 'L4']).map((label, idx) => (
             <div
@@ -367,7 +396,6 @@ export default function FitchSimulatorPage() {
             </div>
           </div>
 
-          {/* Hộp giải thích trạng thái hiện tại */}
           <div
             style={{
               backgroundColor: '#1e293b',
@@ -383,22 +411,16 @@ export default function FitchSimulatorPage() {
             {stepDescriptions[step]}
           </div>
 
-          {/* Sơ đồ cây SVG trực quan */}
+          {/* Sơ đồ cây SVG */}
           <svg viewBox="0 0 600 360" style={{ width: '100%', height: 'auto', backgroundColor: '#1e293b', borderRadius: '10px' }}>
-            {/* Các nhánh nối */}
-            {/* Gốc -> U và V */}
             <line x1="300" y1="65" x2="160" y2="175" stroke={step >= 3 ? '#38bdf8' : '#475569'} strokeWidth="4" />
             <line x1="300" y1="65" x2="440" y2="175" stroke={step >= 3 ? '#38bdf8' : '#475569'} strokeWidth="4" />
-
-            {/* U -> Leaf 1 và Leaf 2 */}
             <line x1="160" y1="175" x2="80" y2="295" stroke={step >= 1 ? '#38bdf8' : '#475569'} strokeWidth="4" />
             <line x1="160" y1="175" x2="240" y2="295" stroke={step >= 1 ? '#38bdf8' : '#475569'} strokeWidth="4" />
-
-            {/* V -> Leaf 3 và Leaf 4 */}
             <line x1="440" y1="175" x2="360" y2="295" stroke={step >= 2 ? '#38bdf8' : '#475569'} strokeWidth="4" />
             <line x1="440" y1="175" x2="520" y2="295" stroke={step >= 2 ? '#38bdf8' : '#475569'} strokeWidth="4" />
 
-            {/* NÚT GỐC (ROOT) */}
+            {/* GỐC */}
             <g transform="translate(300, 65)">
               <rect
                 x="-65"
@@ -422,7 +444,7 @@ export default function FitchSimulatorPage() {
               </text>
             </g>
 
-            {/* NÚT TRUNG GIAN TRÁI (U) */}
+            {/* U */}
             <g transform="translate(160, 175)">
               <rect
                 x="-65"
@@ -446,7 +468,7 @@ export default function FitchSimulatorPage() {
               </text>
             </g>
 
-            {/* NÚT TRUNG GIAN PHẢI (V) */}
+            {/* V */}
             <g transform="translate(440, 175)">
               <rect
                 x="-65"
@@ -470,7 +492,7 @@ export default function FitchSimulatorPage() {
               </text>
             </g>
 
-            {/* 4 NÚT LÁ */}
+            {/* LÁ */}
             {[
               { x: 80, label: leaf1, val: currentRes.leaves[leaf1] },
               { x: 240, label: leaf2, val: currentRes.leaves[leaf2] },
